@@ -1,19 +1,28 @@
 import { create } from 'zustand'
 import { GatewayMessage } from '../api/gatewayClient'
-import { streamChatCompletion, OpenAIChatMessage } from '../api/openaiClient'
 import { useGatewayStore } from './gatewayStore'
 import { useSettingsStore } from './settingsStore'
+import {
+  localId,
+  getSystemPrompt,
+  buildOpenAIMessages,
+  startDirectApiStream
+} from './chatHelpers'
 
 export type ToolCall = {
+  id?: string
   tool: string
   args: string
   status: string
 }
 
 export type ToolResult = {
+  tool_call_id?: string
   tool: string
   output: string
   exitCode?: number
+  imageDataUrl?: string
+  imageDataUrls?: string[]
 }
 
 export type ChatMessage = {
@@ -21,19 +30,20 @@ export type ChatMessage = {
   requestId?: string
   role: 'user' | 'assistant' | 'system'
   content: string
+  reasoningContent?: string
   toolCalls: ToolCall[]
   toolResults: ToolResult[]
   pending: boolean
   error?: string
 }
 
-type ChatState = {
+export type ChatState = {
   messages: ChatMessage[]
   input: string
   streaming: boolean
   abortStream: (() => void) | null
   setInput: (v: string) => void
-  sendMessage: () => void
+  sendMessage: () => Promise<void> | void
   stopGeneration: () => void
   canSend: () => boolean
   handleResponse: (msg: GatewayMessage) => void
@@ -41,15 +51,6 @@ type ChatState = {
   handleToolResult: (msg: GatewayMessage) => void
   handleError: (msg: GatewayMessage) => void
   clearMessages: () => void
-}
-
-let seq = 0
-const localId = (): string => `local-${++seq}-${Date.now()}`
-
-function buildOpenAIMessages(messages: ChatMessage[]): OpenAIChatMessage[] {
-  return messages
-    .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim())
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -66,7 +67,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return settings.isDirectApiConfigured() || !!client?.connected
   },
 
-  sendMessage: () => {
+  sendMessage: async () => {
     const settings = useSettingsStore.getState()
     const directConfig = settings.getDirectApiConfig()
     const { client } = useGatewayStore.getState()
@@ -106,45 +107,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streaming: true
       }))
 
-      const apiMessages = buildOpenAIMessages([...messages, userMsg])
+      const systemPrompt = await getSystemPrompt()
+      const apiMessages = buildOpenAIMessages([...messages, userMsg], systemPrompt)
 
-      const abort = streamChatCompletion(
-        directConfig.baseUrl,
-        directConfig.apiKey,
-        directConfig.model,
-        apiMessages,
-        {
-          onChunk: (content) => {
-            set((s) => ({
-              messages: s.messages.map((m) =>
-                m.id === assistantId ? { ...m, content: m.content + content } : m
-              )
-            }))
-          },
-          onDone: () => {
-            set((s) => ({
-              streaming: false,
-              abortStream: null,
-              messages: s.messages.map((m) =>
-                m.id === assistantId ? { ...m, pending: false } : m
-              )
-            }))
-          },
-          onError: (error) => {
-            set((s) => ({
-              streaming: false,
-              abortStream: null,
-              messages: s.messages.map((m) =>
-                m.id === assistantId
-                  ? { ...m, content: m.content || `错误: ${error}`, error, pending: false }
-                  : m
-              )
-            }))
-          }
-        }
-      )
-
-      set({ abortStream: abort })
+      startDirectApiStream(assistantId, directConfig, apiMessages, set, get, systemPrompt)
     } else if (useGateway && client) {
       const requestId = client.send('chat', {
         text: input,

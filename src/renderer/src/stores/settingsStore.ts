@@ -105,6 +105,19 @@ export const useSettingsStore = create<SettingsState>()(
         return null
       }
     }),
-    { name: 'dobby-settings' }
+    {
+      name: 'dobby-settings',
+      version: 1,
+      migrate: (persisted, version) => {
+        const state = persisted as Record<string, unknown>
+        if (version < 1) {
+          const validModels = KIMI_MODELS.map((m) => m.value) as readonly string[]
+          if (state.kimiModel && !validModels.includes(state.kimiModel as string)) {
+            state.kimiModel = 'kimi-k2.5'
+          }
+        }
+        return state as SettingsState
+      }
+    }
   )
 )

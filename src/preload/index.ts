@@ -1,10 +1,40 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 
+type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
+type ChatMessage = {
+  role: string
+  content: string | null | ContentPart[]
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
+  tool_call_id?: string
+}
+
 type ChatStreamConfig = {
   baseUrl: string
   apiKey: string
   model: string
-  messages: Array<{ role: string; content: string }>
+  messages: ChatMessage[]
+  enableTools?: boolean
+}
+
+type ToolCallInfo = {
+  id: string
+  name: string
+  arguments: string
+}
+
+type ToolResult = {
+  success: boolean
+  content: string
+  details?: unknown
+  imageDataUrl?: string
+  imageDataUrls?: string[]
 }
 
 const api = {
@@ -28,7 +58,20 @@ const api = {
     const handler = (_e: IpcRendererEvent, error: string): void => callback(error)
     ipcRenderer.on('chat-stream-error', handler)
     return () => ipcRenderer.removeListener('chat-stream-error', handler)
-  }
+  },
+  onChatStreamToolCalls: (
+    callback: (data: { toolCalls: ToolCallInfo[]; reasoningContent?: string }) => void
+  ): (() => void) => {
+    const handler = (
+      _e: IpcRendererEvent,
+      data: { toolCalls: ToolCallInfo[]; reasoningContent?: string }
+    ): void => callback(data)
+    ipcRenderer.on('chat-stream-tool-calls', handler)
+    return () => ipcRenderer.removeListener('chat-stream-tool-calls', handler)
+  },
+  toolGetDefinitions: (): Promise<unknown[]> => ipcRenderer.invoke('tool-get-definitions'),
+  toolExecute: (name: string, args: Record<string, unknown>): Promise<ToolResult> =>
+    ipcRenderer.invoke('tool-execute', name, args)
 }
 
 if (process.contextIsolated) {

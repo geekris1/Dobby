@@ -16,6 +16,7 @@
 | [06-project-structure-and-scaffolding.md](06-project-structure-and-scaffolding.md) | @quick-start/electron 脚手架、目录结构、Zustand stores、脚本 |
 | [07-dev-build-release.md](07-dev-build-release.md) | 开发、调试、构建、打包与发布步骤 |
 | [08-implementation-phases.md](08-implementation-phases.md) | 建议实施阶段与里程碑 |
+| [09-tool-use.md](09-tool-use.md) | Tool Use 功能：工具列表、架构、集成改造 |
 
 ## 使用方式
 
